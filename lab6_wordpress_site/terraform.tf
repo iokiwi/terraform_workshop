@@ -5,8 +5,9 @@ terraform {
       version = "~> 4.0"
     }
   }
+  # # Un comment to use remote backend
   # backend "s3" {
-  #   bucket = "pstn-terraform-workshop-states"
+  #   bucket = "terraform-workshop-states"
   #   key = "reserved_instance"
   #   region = "ap-southeast-2"
   # }
@@ -17,14 +18,14 @@ provider "aws" {
   default_tags {
     tags = {
       Namespace = "${var.namespace}"
-      Name = "${var.namespace}-wordpress"
+      Name      = "${var.namespace}-wordpress"
     }
   }
 }
 
 # If you are using your own AWS account
 data "aws_vpc" "default" {
-    default = true
+  default = true
 }
 
 # If you are using one of our work accounts
@@ -76,20 +77,20 @@ data "aws_ami" "ubuntu_latest" {
 }
 
 resource "aws_iam_role" "wordpress" {
-    name = "${var.namespace}-wordpress"
-    assume_role_policy = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-        {
-            Action = "sts:AssumeRole"
-            Effect = "Allow"
-            Sid    = ""
-            Principal = {
-                Service = "ec2.amazonaws.com"
-            }
-        },
-        ]
-    })
+  name = "${var.namespace}-wordpress"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      },
+    ]
+  })
 }
 
 resource "aws_iam_role_policy_attachment" "wordpress_allow_ssm" {
@@ -100,20 +101,20 @@ resource "aws_iam_role_policy_attachment" "wordpress_allow_ssm" {
 locals {
   fqdn = "${var.namespace}.${var.domain}"
   user_data = templatefile("./userdata.sh.tftpl", {
-    namespace = var.namespace,
-    fqdn = local.fqdn,
-    wordpress_db_user = var.wordpress_db_user,
-    wordpress_db_pass = var.wordpress_db_pass,
-    wordpress_db_host = var.wordpress_db_host,
-    wordpress_db_name = var.wordpress_db_name,
+    namespace            = var.namespace,
+    fqdn                 = local.fqdn,
+    wordpress_db_user    = var.wordpress_db_user,
+    wordpress_db_pass    = var.wordpress_db_pass,
+    wordpress_db_host    = var.wordpress_db_host,
+    wordpress_db_name    = var.wordpress_db_name,
     wordpress_db_charset = var.wordpress_db_charset,
-    certbot_email = var.certbot_email,
+    certbot_email        = var.certbot_email,
   })
 }
 
 resource "aws_iam_instance_profile" "wordpress" {
-    name = "${var.namespace}-wordpress"
-    role = aws_iam_role.wordpress.name
+  name = "${var.namespace}-wordpress"
+  role = aws_iam_role.wordpress.name
 }
 
 resource "aws_security_group" "wordpress" {
@@ -122,49 +123,49 @@ resource "aws_security_group" "wordpress" {
   vpc_id      = data.aws_vpc.default.id
 
   egress {
-    description      = "HTTPS to Internet"
-    from_port        = 443
-    to_port          = 443
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
+    description = "HTTPS to Internet"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    description      = "HTTP to Internet"
-    from_port        = 80
-    to_port          = 80
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
+    description = "HTTP to Internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description      = "HTTPS from Internet"
-    from_port        = 443
-    to_port          = 443
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
+    description = "HTTPS from Internet"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description      = "HTTP from Internet"
-    from_port        = 80
-    to_port          = 80
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
+    description = "HTTP from Internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ebs_volume
 resource "aws_ebs_volume" "wordpress_data" {
-  availability_zone = "ap-southeast-2a"
+  availability_zone = var.availability_zone
   size              = 10
-  encrypted = true
-  type = "gp2"
+  encrypted         = true
+  type              = "gp2"
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip
 resource "aws_eip" "wordpress" {
-  vpc      = true
+  vpc = true
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip_association
@@ -175,13 +176,13 @@ resource "aws_eip_association" "eip_assoc" {
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance
 resource "aws_instance" "wordpress" {
-    ami           = data.aws_ami.ubuntu_latest.id
-    instance_type = var.instance_type
-    availability_zone = "ap-southeast-2a"
-    user_data = local.user_data
-    user_data_replace_on_change = true
-    iam_instance_profile = aws_iam_instance_profile.wordpress.name
-    vpc_security_group_ids = [ aws_security_group.wordpress.id ]
+  ami                         = data.aws_ami.ubuntu_latest.id
+  instance_type               = var.instance_type
+  availability_zone           = var.availability_zone
+  user_data                   = local.user_data
+  user_data_replace_on_change = true
+  iam_instance_profile        = aws_iam_instance_profile.wordpress.name
+  vpc_security_group_ids      = [aws_security_group.wordpress.id]
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/volume_attachment
@@ -193,4 +194,8 @@ resource "aws_volume_attachment" "wordpress_data" {
 
 output "public_ip_address" {
   value = aws_eip.wordpress.public_ip
+}
+
+output "dns_record" {
+  value = "Please ensure the following DNS record exsits: (Type: A) ${local.fqdn} -> ${aws_eip.wordpress.public_ip}"
 }
