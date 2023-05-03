@@ -269,7 +269,7 @@ variable "name" {
 }
 ```
 
-### Variable Precidence
+### Variable Precedence
 
 You can mix and match as many of the above methods. The precidence is detailed here
 https://developer.hashicorp.com/terraform/language/values/variables#variable-definition-precedence
@@ -291,12 +291,11 @@ https://developer.hashicorp.com/terraform/language/expressions/types
  * numbers
  * strings
  * maps/object
- * lists/tupes
-
+ * lists/tuples
 
 Lists/Tuples
 
-```bash
+```
 backoff_sequence = [
    1, 1, 2, 3, 5, 8, 13
 ]
@@ -342,28 +341,9 @@ toset(backoff_sequence)   # [1, 2, 3, 5, 8, 13]
 
 ## Setup
 
-Edit `~/.aws/config`
-
-```ini
-[profile test-oos]
-sso_start_url = https://trademe.awsapps.com/start
-sso_region    = ap-southeast-2
-sso_account_id = 985279946524
-sso_role_name = paystation-administrator
-region = ap-southeast-2
-```
-
-```
-aws sso login
-```
-
-```
-export AWS_PROFILE="test-oos"
-```
-
 [lab5_aws_provider](lab5_aws_provider/terraform.tf)
 
-Terraform
+The Terraform AWS Provider
 
 ```
 terraform {
@@ -383,21 +363,12 @@ provider "aws" {
 }
 ```
 
-
-
 ## Data
 
 For getting information about AWS resources that are not created as part of our IAC
 
-```
-ami-05f998315cca9bfe3
-```
-
  * Declaring
-
-
  * Referencing
-
 
 ## Resources
 
@@ -406,14 +377,10 @@ For creating resources in aws
  * Declaring
  * Referencing
 
-
 ## Part 4: Terraform state
 
  * ## local state
  * ## remote state
-
-pstn-terraform-workshop-state
-
 
 More
 
@@ -423,5 +390,4 @@ More
     * for_each - https://developer.hashicorp.com/terraform/language/meta-arguments/for_each
  * Workspaces - https://developer.hashicorp.com/terraform/language/state/workspaces
     * We don't currently use this feature.
-    * Instead we sort of do a similar thing manually by having seperarate env/test and env/prod directories
-
+    * Instead we sort of do a similar thing manually by having separate env/test and env/prod directories

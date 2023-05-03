@@ -14,14 +14,45 @@ terraform {
 
 provider "aws" {
   region = "ap-southeast-2"
+  default_tags {
+    tags = {
+      Namespace = "${var.namespace}"
+      Name = "${var.namespace}-wordpress"
+    }
+  }
 }
 
-# data "aws_caller_identity" "current" {}
-# data "aws_region" "current" {}
-
+# If you are using your own AWS account
 data "aws_vpc" "default" {
     default = true
 }
+
+# If you are using one of our work accounts
+# data "aws_vpc" "default" {
+#   filter {
+#     name   = "tag:Name"
+#     values = ["main"]
+#   }
+# }
+
+# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data/route53_zone
+# resource "aws_route53_zone" "primary" {
+#   name = "${var.domain}"
+# }
+
+# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data/route53_zone
+# data "aws_route53_zone" "primary" {
+#   name = "${var.domain}."
+# }
+
+# resource "aws_route53_record" "wordpress" {
+#   zone_id = aws_route53_zone.primary.zone_id
+#   # zone_id = data.aws_route53_zone.primary.zone_id
+#   name    = "${local.fqdn}"
+#   type    = "A"
+#   ttl     = 5
+#   records = [ aws_eip.wordpress.public_ip ]
+# }
 
 data "aws_ami" "ubuntu_latest" {
   most_recent = true
@@ -44,26 +75,8 @@ data "aws_ami" "ubuntu_latest" {
   owners = ["099720109477"] # Canonical
 }
 
-data "aws_key_pair" "wordpress" {
-    key_name = var.key_pair_name
-}
-
-data "aws_ebs_volume" "bsc_wordpress_data" {
-  most_recent = true
-
-  filter {
-    name   = "volume-type"
-    values = ["gp2"]
-  }
-
-  filter {
-    name   = "tag:Name"
-    values = ["bsc-wordpress"]
-  }
-}
-
 resource "aws_iam_role" "wordpress" {
-    name = "wordpress"
+    name = "${var.namespace}-wordpress"
     assume_role_policy = jsonencode({
         Version = "2012-10-17"
         Statement = [
@@ -79,96 +92,34 @@ resource "aws_iam_role" "wordpress" {
     })
 }
 
-resource "aws_iam_role_policy_attachment" "wordpress_ssm" {
+resource "aws_iam_role_policy_attachment" "wordpress_allow_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   role       = aws_iam_role.wordpress.name
 }
 
 locals {
-  # https://www.cloudflare.com/ips/
-  cloudflare_ips = [
-    "103.21.244.0/22",
-    "103.22.200.0/22",
-    "103.31.4.0/22",
-    "104.16.0.0/13",
-    "104.24.0.0/14",
-    "108.162.192.0/18",
-    "131.0.72.0/22",
-    "141.101.64.0/18",
-    "162.158.0.0/15",
-    "172.64.0.0/13",
-    "173.245.48.0/20",
-    "188.114.96.0/20",
-    "190.93.240.0/20",
-    "197.234.240.0/22",
-    "198.41.128.0/17"
-  ]
-
-  # planetscale_ips = [
-  #   "3.209.149.66/32",
-  #   "3.215.97.46/32",
-  #   "34.193.111.15/32",
-  #   "3.24.39.244/32",
-  #   "54.252.39.42/32",
-  #   "54.253.218.226/32"
-  # ]
-
+  fqdn = "${var.namespace}.${var.domain}"
   user_data = templatefile("./userdata.sh.tftpl", {
-    server_name = var.server_name
+    namespace = var.namespace,
+    fqdn = local.fqdn,
     wordpress_db_user = var.wordpress_db_user,
     wordpress_db_pass = var.wordpress_db_pass,
     wordpress_db_host = var.wordpress_db_host,
     wordpress_db_name = var.wordpress_db_name,
     wordpress_db_charset = var.wordpress_db_charset,
-    # mailgun_domain = var.mailgun_domain,
-    # mailgun_api_key = var.mailgun_api_key,
     certbot_email = var.certbot_email,
   })
 }
 
 resource "aws_iam_instance_profile" "wordpress" {
-    name = "wordpress"
+    name = "${var.namespace}-wordpress"
     role = aws_iam_role.wordpress.name
 }
 
 resource "aws_security_group" "wordpress" {
-  name        = "Wordpress Application"
+  name        = "${var.namespace}-wordpress"
   description = "Application Traffic from wordpress"
   vpc_id      = data.aws_vpc.default.id
-
-  egress {
-    description      = "SMTP out 25"
-    from_port        = 25
-    to_port          = 25
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
-  }
-
-  egress {
-    description      = "SMTP out 465"
-    from_port        = 465
-    to_port          = 465
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
-  }
-
-  egress {
-    description      = "SMTP out 587"
-    from_port        = 587
-    to_port          = 587
-    protocol         = "tcp"
-    cidr_blocks      = [ "0.0.0.0/0" ]
-  }
-
-  egress {
-    description      = "MySQL to Planetscale DB"
-    from_port        = 3306
-    to_port          = 3306
-    protocol         = "tcp"
-    cidr_blocks      = [
-      "0.0.0.0/0",
-    ]
-  }
 
   egress {
     description      = "HTTPS to Internet"
@@ -184,30 +135,6 @@ resource "aws_security_group" "wordpress" {
     to_port          = 80
     protocol         = "tcp"
     cidr_blocks      = [ "0.0.0.0/0" ]
-  }
-
-  ingress {
-    description      = "SSH from Whitelisted Addresses"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = var.cidr_whitelist
-  }
-
-  ingress {
-    description      = "HTTPS from Whitelisted Addresses"
-    from_port        = 443
-    to_port          = 443
-    protocol         = "tcp"
-    cidr_blocks      = var.cidr_whitelist
-  }
-
-  ingress {
-    description      = "HTTP from Whitelisted Adresses"
-    from_port        = 80
-    to_port          = 80
-    protocol         = "tcp"
-    cidr_blocks      = var.cidr_whitelist
   }
 
   ingress {
@@ -227,55 +154,43 @@ resource "aws_security_group" "wordpress" {
   }
 }
 
-data "aws_eip" "wordpress" {
-  filter {
-    name   = "tag:Name"
-    values = ["bsc-wordpress"]
-  }
+# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ebs_volume
+resource "aws_ebs_volume" "wordpress_data" {
+  availability_zone = "ap-southeast-2a"
+  size              = 10
+  encrypted = true
+  type = "gp2"
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip
-# resource "aws_eip" "wordpress" {
-# #   instance = aws_instance.wordpress.id
-#   vpc      = true
-# }
-
-# # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip_association
-# resource "aws_eip_association" "wordpress" {
-#   instance_id   = aws_instance.wordpress.id
-#   allocation_id = aws_eip.wordpress.allocation_id
-# }
+resource "aws_eip" "wordpress" {
+  vpc      = true
+}
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/eip_association
 resource "aws_eip_association" "eip_assoc" {
   instance_id   = aws_instance.wordpress.id
-  allocation_id = data.aws_eip.wordpress.id
+  allocation_id = aws_eip.wordpress.id
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance
 resource "aws_instance" "wordpress" {
     ami           = data.aws_ami.ubuntu_latest.id
     instance_type = var.instance_type
-    key_name = var.key_pair_name
     availability_zone = "ap-southeast-2a"
-
     user_data = local.user_data
     user_data_replace_on_change = true
     iam_instance_profile = aws_iam_instance_profile.wordpress.name
     vpc_security_group_ids = [ aws_security_group.wordpress.id ]
-
-    tags = {
-      Name = "bsc-wordpress"
-    }
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/volume_attachment
 resource "aws_volume_attachment" "wordpress_data" {
-  volume_id   = data.aws_ebs_volume.bsc_wordpress_data.id
+  volume_id   = aws_ebs_volume.wordpress_data.id
   instance_id = aws_instance.wordpress.id
   device_name = "/dev/sde"
 }
 
-# output "userdata" {
-#   value = local.user_data
-# }
+output "public_ip_address" {
+  value = aws_eip.wordpress.public_ip
+}

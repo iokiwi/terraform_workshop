@@ -15,8 +15,10 @@ apt-cache policy docker-ce
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-compose
 
 # Block until external ebs volume is attached and available to be mounted
+EBS_DEVICE_NAME="nvme1n1"
+EBS_DEVICE_PATH="/dev/$EBS_DEVICE_NAME"
 while true; do
-    if lsblk | grep -q "nvme1n1"; then
+    if lsblk | grep -q "$EBS_DEVICE_NAME"; then
         echo "nvme1n1 found in the output of lsblk. Continuing..."
         break
     else
@@ -25,20 +27,23 @@ while true; do
     fi
 done
 
-# sudo mkfs.ext4 /dev/nvme1n1; then
+FILESYSTEM_TYPE=$(blkid -s TYPE -o value "$EBS_DEVICE_PATH" || true)
+if [ -z "$FILESYSTEM_TYPE" ]; then
+  echo "Creating ext4 filesystem on EBS volume..."
+  sudo mkfs.ext4 "$EBS_DEVICE_PATH"
+fi
 
-NAMESPACE="${server_name}"
+FQDN="${fqdn}"
+DATA_MOUNT_DIR="/mnt/data"
+mkdir -p $DATA_MOUNT_DIR
 
-# DATA_MOUNT_DIR="/mnt/data"
-# mkdir -p $DATA_MOUNT_DIR
+WORDPRESS_INSTALL=/home/ubuntu/wordpress
+LETSENCRYPT_DATA=$DATA_MOUNT_DIR/letsencrypt
+CERTBOT_DATA=$DATA_MOUNT_DIR/certbot
+MYSQL_DATA=$DATA_MOUNT_DIR/mysql
+WORDPRESS_DATA=$DATA_MOUNT_DIR/wordpress
 
-# WORDPRESS_INSTALL=/home/ubuntu/wordpress
-# LETSENCRYPT_DATA=$DATA_MOUNT_DIR/letsencrypt
-# CERTBOT_DATA=$DATA_MOUNT_DIR/certbot
-# MYSQL_DATA=$DATA_MOUNT_DIR/mysql
-# WORDPRESS_DATA=$DATA_MOUNT_DIR/wordpress
-
-# mkdir -p $WORDPRESS_INSTALL $LETSENCRYPT_DATA $CERTBOT_DATA $WORDPRESS_DATA $MYSQL_DATA
+mkdir -p $WORDPRESS_INSTALL $LETSENCRYPT_DATA $CERTBOT_DATA $WORDPRESS_DATA $MYSQL_DATA
 
 ########################################################################################
 # Certbot - Initialise Certbot and Generate TLS Certificates
@@ -47,7 +52,7 @@ NAMESPACE="${server_name}"
 cat << EOF > $WORDPRESS_INSTALL/init-certbot.conf
 server {
     listen 80;
-    server_name $NAMESPACE;
+    server_name $FQDN;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -81,7 +86,7 @@ services:
 EOF
 
 # Init certificates if they don't exist
-if [ ! -d $LETSENCRYPT_DATA/live/$NAMESPACE ]; then
+if [ ! -d $LETSENCRYPT_DATA/live/$FQDN ]; then
   docker-compose -f $WORDPRESS_INSTALL/docker-compose-init-certbot.yml up -d nginx
 
   docker-compose -f $WORDPRESS_INSTALL/docker-compose-init-certbot.yml run \
@@ -89,11 +94,11 @@ if [ ! -d $LETSENCRYPT_DATA/live/$NAMESPACE ]; then
       --email ${certbot_email} \
       --agree-tos \
       --webroot -w /var/www/certbot \
-      -d $NAMESPACE
+      -d $FQDN
 
   docker-compose -f $WORDPRESS_INSTALL/docker-compose-init-certbot.yml stop nginx
 else
-  echo "Certs exist for $NAMESPACE. Skipping cert creation"
+  echo "Certs exist for $FQDN. Skipping cert creation"
 fi
 
 cat << EOF >> /var/spool/cron/crontabs/root
@@ -120,8 +125,6 @@ services:
     image: wordpress:6.2-fpm
     restart: always
     environment:
-
-      # WORDPRESS_DB_HOST: "db"
       WORDPRESS_DB_HOST: "${wordpress_db_host}"
       WORDPRESS_DB_USER: "${wordpress_db_user}"
       WORDPRESS_DB_PASSWORD: "${wordpress_db_pass}"
@@ -129,8 +132,8 @@ services:
       WORDPRESS_DB_CHARSET: "${wordpress_db_charset}"
 
       WORDPRESS_CONFIG_EXTRA: |
-        define('WORDPRESS_INSTALL', 'https://$NAMESPACE');
-        define('WP_SITEURL', 'https://$NAMESPACE');
+        define('WORDPRESS_INSTALL', 'https://$FQDN');
+        define('WP_SITEURL', 'https://$FQDN');
 
     volumes:
       - $WORDPRESS_DATA:/var/www/html
@@ -148,9 +151,10 @@ services:
       - $CERTBOT_DATA:/var/www/certbot
       - $LETSENCRYPT_DATA:/etc/letsencrypt
 
-  Use a local database instead of a remote database
+  # Use a local database instead of a remote database
   db:
-    image: mysql:8-debian
+    # image: mysql:8-debian
+    image: mariadb:latest
     restart: always
     environment:
       MYSQL_DATABASE: ${wordpress_db_name}
@@ -166,7 +170,7 @@ cat << EOF > $WORDPRESS_INSTALL/wordpress.conf
 server {
     listen 80;
 
-    server_name $NAMESPACE;
+    server_name $FQDN;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -180,7 +184,7 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name $NAMESPACE;
+    server_name $FQDN;
 
     root /var/www/html;
     index index.php;
@@ -209,8 +213,8 @@ server {
     ssl_stapling on;
     ssl_stapling_verify on;
 
-    ssl_certificate /etc/letsencrypt/live/$NAMESPACE/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/$NAMESPACE/privkey.pem; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/$FQDN/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/$FQDN/privkey.pem; # managed by Certbot
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
 }
 EOF
