@@ -1,5 +1,8 @@
 #!/bin/bash
 
+FQDN="${fqdn}"
+PRIVILEGED_IP_ADDRESS="${privileged_ip_address}"
+
 # set -x
 exec > >(tee /var/log/user-data.log|logger -t user-data ) 2>&1
 
@@ -33,7 +36,6 @@ if [ -z "$FILESYSTEM_TYPE" ]; then
   sudo mkfs.ext4 "$EBS_DEVICE_PATH"
 fi
 
-FQDN="${fqdn}"
 DATA_MOUNT_DIR="/mnt/data"
 mkdir -p $DATA_MOUNT_DIR
 
@@ -191,6 +193,19 @@ server {
 
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    # Limit access to the install screen to be from
+    # our current address
+    location = /wp-admin/install.php {
+        allow $PRIVILEGED_IP_ADDRESS/32;
+        deny all;
+
+        fastcgi_pass wordpress:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param PATH_INFO \$fastcgi_path_info;
     }
 
     location ~ \.php$ {

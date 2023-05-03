@@ -5,12 +5,6 @@ terraform {
       version = "~> 4.0"
     }
   }
-  # # Un comment to use remote backend
-  # backend "s3" {
-  #   bucket = "terraform-workshop-states"
-  #   key = "reserved_instance"
-  #   region = "ap-southeast-2"
-  # }
 }
 
 provider "aws" {
@@ -23,37 +17,33 @@ provider "aws" {
   }
 }
 
-# If you are using your own AWS account
+# If you are using the paystation-oos-test account
 data "aws_vpc" "default" {
-  default = true
+  default = false
 }
 
-# If you are using one of our work accounts
-# data "aws_vpc" "default" {
-#   filter {
-#     name   = "tag:Name"
-#     values = ["main"]
-#   }
-# }
+data "aws_subnet" "public" {
+  vpc_id            = data.aws_vpc.default.id
+  availability_zone = var.availability_zone
+  filter {
+    name   = "tag:Name"
+    values = ["PublicSubnet*"]
+  }
+}
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data/route53_zone
-# resource "aws_route53_zone" "primary" {
-#   name = "${var.domain}"
-# }
+data "aws_route53_zone" "primary" {
+  name = "${var.domain}."
+}
 
-# https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data/route53_zone
-# data "aws_route53_zone" "primary" {
-#   name = "${var.domain}."
-# }
-
-# resource "aws_route53_record" "wordpress" {
-#   zone_id = aws_route53_zone.primary.zone_id
-#   # zone_id = data.aws_route53_zone.primary.zone_id
-#   name    = "${local.fqdn}"
-#   type    = "A"
-#   ttl     = 5
-#   records = [ aws_eip.wordpress.public_ip ]
-# }
+resource "aws_route53_record" "wordpress" {
+  # zone_id = aws_route53_zone.primary.zone_id
+  zone_id = data.aws_route53_zone.primary.zone_id
+  name    = local.fqdn
+  type    = "A"
+  ttl     = 5
+  records = [aws_eip.wordpress.public_ip]
+}
 
 data "aws_ami" "ubuntu_latest" {
   most_recent = true
@@ -101,14 +91,15 @@ resource "aws_iam_role_policy_attachment" "wordpress_allow_ssm" {
 locals {
   fqdn = "${var.namespace}.${var.domain}"
   user_data = templatefile("./userdata.sh.tftpl", {
-    namespace            = var.namespace,
-    fqdn                 = local.fqdn,
-    wordpress_db_user    = var.wordpress_db_user,
-    wordpress_db_pass    = var.wordpress_db_pass,
-    wordpress_db_host    = var.wordpress_db_host,
-    wordpress_db_name    = var.wordpress_db_name,
-    wordpress_db_charset = var.wordpress_db_charset,
-    certbot_email        = var.certbot_email,
+    namespace             = var.namespace,
+    fqdn                  = local.fqdn,
+    privileged_ip_address = var.privileged_ip_address
+    wordpress_db_user     = var.wordpress_db_user,
+    wordpress_db_pass     = var.wordpress_db_pass,
+    wordpress_db_host     = var.wordpress_db_host,
+    wordpress_db_name     = var.wordpress_db_name,
+    wordpress_db_charset  = var.wordpress_db_charset,
+    certbot_email         = var.certbot_email,
   })
 }
 
@@ -178,6 +169,7 @@ resource "aws_eip_association" "eip_assoc" {
 resource "aws_instance" "wordpress" {
   ami                         = data.aws_ami.ubuntu_latest.id
   instance_type               = var.instance_type
+  subnet_id                   = data.aws_subnet.public.id
   availability_zone           = var.availability_zone
   user_data                   = local.user_data
   user_data_replace_on_change = true
@@ -196,6 +188,11 @@ output "public_ip_address" {
   value = aws_eip.wordpress.public_ip
 }
 
-output "dns_record" {
-  value = "Please ensure the following DNS record exsits: (Type: A) ${local.fqdn} -> ${aws_eip.wordpress.public_ip}"
+output "url" {
+  value = "https://${local.fqdn}"
 }
+
+# # [BYOA] - Uncomment this
+# output "dns_record" {
+#   value = "Please ensure the following DNS record exsits: (Type: A) ${local.fqdn} -> ${aws_eip.wordpress.public_ip}"
+# }
